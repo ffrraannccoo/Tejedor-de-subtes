@@ -1,0 +1,5 @@
+{
+  "name": "Subway Weaver",
+  "description": "A chill puzzle game where you build subway networks to fulfill passenger requests in real cities. Avoid obstacles and optimize the route.",
+  "requestFramePermissions": []
+}
