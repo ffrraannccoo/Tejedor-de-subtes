@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CellType, LevelConfig, Station, Coordinate } from '../types';
 import { getKey, findPath } from '../utils/pathfinding';
-import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info } from 'lucide-react';
+import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
 
 interface BoardProps {
     level: LevelConfig;
     onLevelComplete: () => void;
     onCollision: () => void;
+    onExit: () => void;
 }
 
-// Adjusted constants for Mobile First
-const GRID_SIZE = 15; // Reduced from 20 for better density on phone
-const CELL_SIZE = 60; // Increased size for easier tapping
+const GRID_SIZE = 15; 
+const CELL_SIZE = 60; 
 
 const TRACK_COLORS = [
     { name: 'A', hex: '#38bdf8' }, // Light Blue
@@ -22,7 +22,7 @@ const TRACK_COLORS = [
     { name: 'H', hex: '#eab308' }, // Yellow
 ];
 
-const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) => {
+const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onExit }) => {
     // --- Game Logic State ---
     const [connections, setConnections] = useState<Map<string, string[]>>(new Map());
     const [edgeColors, setEdgeColors] = useState<Map<string, string>>(new Map());
@@ -34,30 +34,46 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     const [isSimulating, setIsSimulating] = useState(false);
     const [trainPosition, setTrainPosition] = useState<Coordinate | null>(null);
     const [simulationMessage, setSimulationMessage] = useState<string | null>(null);
-    const [showMission, setShowMission] = useState(true); // Toggle mission details
+    const [missionExpanded, setMissionExpanded] = useState(true);
 
     // --- Viewport / Gesture State ---
     const containerRef = useRef<HTMLDivElement>(null);
-    const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.8 }); // Default zoom out slightly to see more context
+    const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.5 });
     const pointers = useRef<Map<number, { x: number, y: number }>>(new Map());
     const prevPinchDiff = useRef<number>(-1);
     const isDraggingView = useRef<boolean>(false);
     const lastDragCell = useRef<Coordinate | null>(null);
 
-    // Initial centering
+    // --- Auto-Fit Logic ---
     useEffect(() => {
-        if (containerRef.current) {
-            const { width, height } = containerRef.current.getBoundingClientRect();
-            const boardWidth = GRID_SIZE * CELL_SIZE;
-            const boardHeight = GRID_SIZE * CELL_SIZE;
-            
-            const initialScale = Math.min(width / boardWidth, height / boardHeight, 1) * 0.85; // Leave room for UI
-            const x = (width - boardWidth * initialScale) / 2;
-            const y = (height - boardHeight * initialScale) / 2 - 50; // Offset up slightly for bottom bar
-            
-            setTransform({ x, y, scale: initialScale });
-        }
-    }, [level]);
+        const fitBoard = () => {
+            if (containerRef.current) {
+                const { width, height } = containerRef.current.getBoundingClientRect();
+                if (width === 0 || height === 0) return;
+
+                const boardSize = GRID_SIZE * CELL_SIZE;
+                const padding = 20; // Internal padding
+                
+                // Calculate scale to fit completely within the flex-1 container
+                const scaleX = (width - padding) / boardSize;
+                const scaleY = (height - padding) / boardSize;
+                const initialScale = Math.min(scaleX, scaleY, 1.2); // Cap zoom at 1.2
+                
+                const x = (width - boardSize * initialScale) / 2;
+                const y = (height - boardSize * initialScale) / 2;
+                
+                setTransform({ x, y, scale: initialScale });
+            }
+        };
+
+        // Run immediately and on resize
+        fitBoard();
+        window.addEventListener('resize', fitBoard);
+        // Short delay to allow layout to settle
+        setTimeout(fitBoard, 100);
+
+        return () => window.removeEventListener('resize', fitBoard);
+    }, [level]); // Re-run when level changes
 
     // Reset game state on level change
     useEffect(() => {
@@ -68,7 +84,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         setSimulationMessage(null);
         setDrawMode('add');
         setCollisionCell(null);
-        setShowMission(true);
+        setMissionExpanded(true);
     }, [level]);
 
     // Clear collision effect
@@ -78,14 +94,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             return () => clearTimeout(timer);
         }
     }, [collisionCell]);
-
-    // Auto-hide mission after 4 seconds
-    useEffect(() => {
-        if (showMission) {
-            const timer = setTimeout(() => setShowMission(false), 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [showMission]);
 
     // --- Logic Helpers ---
     const isObstacle = (x: number, y: number) => level.obstacles.some(o => o.x === x && o.y === y);
@@ -160,7 +168,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
         if (pointers.current.size === 2) {
-            // Multi-touch Pan & Zoom
             const values = Array.from(pointers.current.values());
             const p1 = values[0] as { x: number; y: number };
             const p2 = values[1] as { x: number; y: number };
@@ -174,7 +181,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 const zoomFactor = delta * 0.005;
                 setTransform(prev => ({
                     ...prev,
-                    scale: Math.min(Math.max(0.4, prev.scale + zoomFactor), 3)
+                    scale: Math.min(Math.max(0.2, prev.scale + zoomFactor), 3)
                 }));
             }
             prevPinchDiff.current = distance;
@@ -187,7 +194,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             }));
 
         } else if (pointers.current.size === 1 && !isDraggingView.current && !isSimulating) {
-            // Draw
             const cell = getGridCell(e.clientX, e.clientY);
             if (!cell || !lastDragCell.current) return;
 
@@ -224,7 +230,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         if (neighbors.length === 0) return null;
 
         const center = CELL_SIZE / 2;
-        const thickness = 10; // Thicker lines for mobile
+        const thickness = 10;
         const elements: React.ReactElement[] = [];
 
         const getColor = (k2: string) => {
@@ -295,7 +301,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         if (isSimulating) return;
         setIsSimulating(true);
         setSimulationMessage("Revisando...");
-        setShowMission(false);
+        setMissionExpanded(false); // Collapse header on start
 
         const routeIds = level.routeRequest;
         let fullPath: Coordinate[] = [];
@@ -332,30 +338,34 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     };
 
     return (
-        <div className="flex flex-col w-full h-full relative overflow-hidden bg-slate-200">
+        <div className="flex flex-col h-full w-full bg-slate-200">
             
-            {/* Top Info Overlay (Collapsible) */}
-            <div className={`absolute top-2 left-2 right-2 z-40 transition-all duration-300 ${showMission ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
-                 <div className="bg-white/95 backdrop-blur shadow-md border border-slate-200 rounded-2xl p-4 max-w-md mx-auto">
-                     <div className="flex justify-between items-start mb-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{level.city}</span>
-                        <button onClick={() => setShowMission(false)} className="text-slate-400 hover:text-slate-600"><Info size={16}/></button>
-                     </div>
-                     <p className="text-sm text-slate-700 font-medium leading-relaxed">{level.description}</p>
-                 </div>
+            {/* 1. Header Area (Fixed) - Does not overlap board */}
+            <div className="bg-white shrink-0 shadow-sm z-30 border-b border-slate-200">
+                <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-2">
+                         <button onClick={onExit} className="p-1 rounded-full text-slate-400 hover:bg-slate-100"><ArrowLeft size={20}/></button>
+                         <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{level.city}</span>
+                    </div>
+                    <button 
+                        onClick={() => setMissionExpanded(!missionExpanded)} 
+                        className="flex items-center gap-1 text-slate-500 text-xs font-bold py-1 px-2 rounded hover:bg-slate-50"
+                    >
+                        MISIÓN {missionExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                    </button>
+                </div>
+                
+                {/* Collapsible Mission Text */}
+                {missionExpanded && (
+                    <div className="px-4 pb-3 animate-in slide-in-from-top-2 duration-200">
+                         <p className="text-sm text-slate-800 font-medium leading-relaxed border-l-4 border-indigo-500 pl-3">
+                            {level.description}
+                         </p>
+                    </div>
+                )}
             </div>
 
-            {/* Toggle Info Button (when hidden) */}
-            {!showMission && !isSimulating && (
-                <button 
-                    onClick={() => setShowMission(true)}
-                    className="absolute top-4 left-4 z-40 bg-white p-2 rounded-full shadow-md text-slate-500"
-                >
-                    <Info size={24} />
-                </button>
-            )}
-
-            {/* Viewport Container */}
+            {/* 2. Middle Area (Board) - Takes remaining space */}
             <div 
                 ref={containerRef}
                 className="flex-1 w-full relative touch-none bg-slate-200 overflow-hidden cursor-crosshair"
@@ -365,10 +375,10 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 onPointerCancel={handlePointerUp}
                 onPointerLeave={handlePointerUp}
             >
-                {/* Simulation Message */}
+                {/* Status Toast */}
                 {simulationMessage && (
-                    <div className="absolute top-20 left-0 right-0 z-50 flex justify-center pointer-events-none">
-                        <div className={`px-6 py-2 rounded-full text-base font-bold shadow-xl animate-in fade-in zoom-in ${
+                    <div className="absolute top-4 left-0 right-0 z-50 flex justify-center pointer-events-none">
+                        <div className={`px-4 py-1.5 rounded-full text-sm font-bold shadow-xl animate-in fade-in zoom-in ${
                             simulationMessage.includes("Sin camino") ? "bg-rose-500 text-white" : "bg-emerald-500 text-white"
                         }`}>
                             {simulationMessage}
@@ -376,6 +386,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                     </div>
                 )}
 
+                {/* Scalable Game Content */}
                 <div 
                     style={{ 
                         transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
@@ -383,9 +394,10 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                         width: GRID_SIZE * CELL_SIZE,
                         height: GRID_SIZE * CELL_SIZE,
                     }}
-                    className="absolute bg-white shadow-2xl rounded-sm"
+                    className="absolute bg-white shadow-2xl rounded-sm will-change-transform"
                 >
-                    <div className="absolute inset-0 opacity-10 pointer-events-none"
+                     {/* Background Dots */}
+                     <div className="absolute inset-0 opacity-20 pointer-events-none"
                          style={{
                             backgroundImage: 'radial-gradient(#64748b 2px, transparent 2px)',
                             backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
@@ -411,9 +423,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                             const isStart = routeIndex === 0;
                             const isEnd = routeIndex === level.routeRequest.length - 1;
                             const isColliding = collisionCell?.x === x && collisionCell?.y === y;
-                            const k = getKey(x, y);
-                            const neighborCount = connections.get(k)?.length || 0;
-                            const isCombination = neighborCount > 2;
 
                             return (
                                 <div key={i} className={`relative ${isColliding ? 'bg-red-200/50' : ''}`}>
@@ -425,7 +434,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
 
                                     {obs && (
                                         <div className={`absolute inset-0 flex items-center justify-center z-20 ${isColliding ? 'scale-110' : ''}`}>
-                                            <div className="bg-white/90 p-1.5 rounded-lg shadow-sm border border-slate-100">
+                                            <div className="bg-white/90 p-1 rounded-lg shadow-sm border border-slate-100">
                                                 {obs.type === CellType.OBSTACLE_WATER && <Droplets size={CELL_SIZE * 0.5} className="text-sky-500" />}
                                                 {obs.type === CellType.OBSTACLE_FOSSIL && <Skull size={CELL_SIZE * 0.5} className="text-amber-600" />}
                                                 {obs.type === CellType.OBSTACLE_TUNNEL && <Pickaxe size={CELL_SIZE * 0.5} className="text-slate-400" />}
@@ -436,19 +445,20 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                                     {station && (
                                         <div className="absolute inset-0 flex items-center justify-center z-30">
                                             <div className={`
-                                                rounded-full border-[4px] flex items-center justify-center bg-white shadow-md z-10
-                                                ${isStart ? 'border-emerald-500 w-[70%] h-[70%]' : 
-                                                  isEnd ? 'border-rose-500 w-[70%] h-[70%]' : 
-                                                  routeIndex > 0 ? 'border-amber-400 w-[60%] h-[60%]' :
-                                                  isCombination ? 'border-slate-800 w-[60%] h-[60%]' : 'border-slate-300 w-[50%] h-[50%]'}
+                                                rounded-full border-[3px] flex items-center justify-center bg-white shadow-md z-10
+                                                ${isStart ? 'border-emerald-500 w-[65%] h-[65%]' : 
+                                                  isEnd ? 'border-rose-500 w-[65%] h-[65%]' : 
+                                                  routeIndex > 0 ? 'border-amber-400 w-[55%] h-[55%]' :
+                                                   'border-slate-300 w-[45%] h-[45%]'}
                                             `}>
                                                 {routeIndex !== -1 && (
                                                     <span className="text-sm font-black text-slate-700">{routeIndex + 1}</span>
                                                 )}
                                             </div>
                                             
-                                            <div className="absolute -top-[70%] left-1/2 -translate-x-1/2 z-40">
-                                                <div className="bg-slate-900/90 text-xs font-bold text-white px-2 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+                                            {/* Station Labels - Always visible, scaled down slightly visually */}
+                                            <div className="absolute -top-[55%] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+                                                <div className="bg-slate-900/80 text-[10px] leading-tight font-bold text-white px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap backdrop-blur-sm">
                                                     {station.name}
                                                 </div>
                                             </div>
@@ -470,7 +480,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                                 display: 'flex', alignItems: 'center', justifyContent: 'center'
                             }}
                         >
-                            <div className="bg-yellow-400 text-black p-2 rounded-xl shadow-xl scale-125 ring-4 ring-white">
+                            <div className="bg-yellow-400 text-black p-1.5 rounded-lg shadow-xl scale-110 ring-2 ring-white">
                                 <TrainFront size={CELL_SIZE * 0.6} fill="currentColor" />
                             </div>
                         </div>
@@ -478,70 +488,70 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 </div>
             </div>
 
-            {/* Bottom Control Bar - Mobile Optimized "Thumb Zone" */}
-            <div className="bg-white border-t border-slate-200 pb-safe pt-2 px-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 shrink-0 flex flex-col gap-3">
+            {/* 3. Bottom Controls (Fixed) */}
+            <div className="bg-white border-t border-slate-200 px-3 pb-4 pt-2 shrink-0 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
                 
-                {/* Row 1: Colors (Horizontal Scroll) */}
-                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
-                    {TRACK_COLORS.map(c => (
+                {/* Row 1: Tools & Play */}
+                <div className="flex gap-2 mb-3">
+                     <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
                         <button
-                            key={c.name}
-                            onClick={() => { setActiveColor(c.hex); setDrawMode('add'); }}
-                            className={`w-12 h-12 shrink-0 rounded-full flex items-center justify-center transition-transform ${
-                                activeColor === c.hex && drawMode === 'add' 
-                                ? 'ring-4 ring-slate-800 scale-110 shadow-lg' 
-                                : 'opacity-80 scale-95'
-                            }`}
-                            style={{ backgroundColor: c.hex }}
-                        >
-                            <span className="text-xs font-bold text-white shadow-sm">{c.name}</span>
-                        </button>
-                    ))}
-                </div>
-
-                {/* Row 2: Main Actions */}
-                <div className="flex items-center justify-between gap-4 pb-4">
-                    <div className="flex gap-3">
-                        <button
-                            onClick={() => setDrawMode(drawMode === 'add' ? 'remove' : 'add')}
-                            className={`flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-all ${
-                                drawMode === 'remove' 
-                                ? 'bg-rose-100 text-rose-600 ring-2 ring-rose-500' 
-                                : 'bg-slate-100 text-slate-500'
+                            onClick={() => setDrawMode('add')}
+                            className={`p-2 rounded-lg transition-all ${
+                                drawMode === 'add' ? 'bg-white shadow text-slate-800' : 'text-slate-400'
                             }`}
                         >
-                            {drawMode === 'remove' ? <Eraser size={24} /> : <Pencil size={24} />}
-                            <span className="text-[10px] font-bold uppercase mt-1">
-                                {drawMode === 'remove' ? 'Borrar' : 'Dibujar'}
-                            </span>
+                            <Pencil size={20} />
                         </button>
-                        
-                        <button 
-                            onClick={() => { setConnections(new Map()); setEdgeColors(new Map()); }}
-                            className="flex flex-col items-center justify-center w-16 h-14 rounded-2xl bg-slate-100 text-slate-500 active:bg-slate-200"
+                        <button
+                            onClick={() => setDrawMode('remove')}
+                            className={`p-2 rounded-lg transition-all ${
+                                drawMode === 'remove' ? 'bg-white shadow text-rose-600' : 'text-slate-400'
+                            }`}
                         >
-                            <RotateCcw size={22} />
-                            <span className="text-[10px] font-bold uppercase mt-1">Limpiar</span>
+                            <Eraser size={20} />
                         </button>
-                    </div>
+                     </div>
 
                     <button 
+                        onClick={() => { setConnections(new Map()); setEdgeColors(new Map()); }}
+                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:text-rose-600 active:bg-slate-200"
+                    >
+                        <RotateCcw size={18} />
+                    </button>
+
+                     <button 
                         onClick={startSimulation}
                         disabled={isSimulating}
-                        className={`flex-1 h-14 rounded-2xl font-bold text-lg tracking-wide shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
+                        className={`flex-1 h-10 rounded-xl font-bold text-sm tracking-wide shadow-sm flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
                             isSimulating 
                             ? 'bg-slate-100 text-slate-400' 
                             : 'bg-indigo-600 text-white shadow-indigo-200'
                         }`}
                     >
-                        {isSimulating ? 'Viajando...' : 'ARRANCAR'}
-                        {!isSimulating && <Play size={24} fill="currentColor" />}
+                        {isSimulating ? '...' : 'ARRANCAR'}
+                        {!isSimulating && <Play size={16} fill="currentColor" />}
                     </button>
+                </div>
+
+                {/* Row 2: Colors */}
+                <div className="flex justify-between items-center px-1">
+                    {TRACK_COLORS.map(c => (
+                        <button
+                            key={c.name}
+                            onClick={() => { setActiveColor(c.hex); setDrawMode('add'); }}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-transform ${
+                                activeColor === c.hex && drawMode === 'add' 
+                                ? 'ring-2 ring-offset-2 ring-slate-800 scale-110' 
+                                : 'opacity-80 scale-95'
+                            }`}
+                            style={{ backgroundColor: c.hex }}
+                        >
+                            <span className="text-[10px] font-bold text-white drop-shadow-md">{c.name}</span>
+                        </button>
+                    ))}
                 </div>
             </div>
             
-            {/* Safe Area Spacer for iOS Home Bar */}
-            <div className="h-safe-bottom bg-white"></div>
         </div>
     );
 };

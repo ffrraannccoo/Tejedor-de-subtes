@@ -69,7 +69,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className={`h-screen w-screen overflow-hidden bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-indigo-100 transition-colors ${isShaking ? 'collision-shake' : ''}`}>
+        <div className={`h-[100dvh] w-screen overflow-hidden bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-indigo-100 transition-colors ${isShaking ? 'collision-shake' : ''}`}>
             
             {/* Conditional Header - Hidden during gameplay to save space for the board */}
             {appState !== AppState.PLAYING && (
@@ -90,16 +90,12 @@ const App: React.FC = () => {
                 </header>
             )}
 
-            {/* In-Game Minimal Header (Overlaid inside Board in Board.tsx usually, but we keep a back button here if needed? 
-                Actually, Board.tsx now handles the UI overlay. We just need a container for the app states.) 
-            */}
-            
             {/* Main Content Area */}
             <main className="flex-1 relative flex flex-col w-full h-full overflow-hidden">
                 
                 {appState === AppState.MENU && (
                     <div className="absolute inset-0 overflow-auto p-4 flex flex-col items-center">
-                        <div className="max-w-lg w-full space-y-8 mt-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                        <div className="max-w-lg w-full space-y-8 mt-8 animate-in fade-in slide-in-from-bottom-8 duration-700 pb-10">
                              <div className="text-center space-y-4">
                                 <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Armá tu Red</h2>
                                 <p className="text-slate-500 leading-relaxed">Conectá las estaciones, esquivá los líos y hacé que la gente llegue a tiempo.</p>
@@ -148,24 +144,18 @@ const App: React.FC = () => {
                 )}
 
                 {appState === AppState.PLAYING && currentLevel && (
-                    <div className="w-full h-full animate-in fade-in duration-500">
+                    <div className="w-full h-full flex flex-col animate-in fade-in duration-500">
                         <Board 
                             level={currentLevel} 
                             onLevelComplete={handleLevelComplete} 
                             onCollision={triggerScreenShake}
+                            onExit={handleBackToMenu}
                         />
-                        {/* Floating Back Button for Game Mode */}
-                        <button 
-                            onClick={handleBackToMenu}
-                            className="absolute top-4 right-4 z-[60] p-2 bg-white/90 backdrop-blur rounded-full shadow-md border border-slate-200 text-slate-400 hover:text-slate-700"
-                        >
-                            <TrainFront size={20} />
-                        </button>
                     </div>
                 )}
 
                 {appState === AppState.LEVEL_COMPLETE && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+                    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
                         <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-6 animate-in zoom-in-95 duration-300">
                              <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full">
                                 <TrainFront size={40} className="text-green-600" />
