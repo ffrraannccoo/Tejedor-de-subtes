@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { CellType, LevelConfig, Station, Coordinate } from '../types';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { CellType, LevelConfig, Station, Coordinate, LevelStats } from '../types';
 import { getKey, findPath } from '../utils/pathfinding';
 import { playBuildSound, playCollisionSound, playWinSound, playTrainWhistle, initAudio, startTrainLoop, stopTrainLoop } from '../services/soundService';
-import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
+import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info, ChevronUp, ChevronDown, ArrowLeft, Ruler } from 'lucide-react';
 
 interface BoardProps {
     level: LevelConfig;
-    onLevelComplete: () => void;
+    onLevelComplete: (stats: LevelStats) => void;
     onCollision: () => void;
     onExit: () => void;
 }
@@ -31,11 +31,17 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
     const [activeColor, setActiveColor] = useState<string>(TRACK_COLORS[0].hex);
     const [collisionCell, setCollisionCell] = useState<Coordinate | null>(null);
 
+    // --- Interaction State ---
+    const [poppedStation, setPoppedStation] = useState<string | null>(null);
+
     // --- Simulation State ---
     const [isSimulating, setIsSimulating] = useState(false);
     const [trainPosition, setTrainPosition] = useState<Coordinate | null>(null);
     const [simulationMessage, setSimulationMessage] = useState<string | null>(null);
     const [missionExpanded, setMissionExpanded] = useState(true);
+
+    // --- Stats State ---
+    const [kilometers, setKilometers] = useState(0);
 
     // --- Viewport / Gesture State ---
     const containerRef = useRef<HTMLDivElement>(null);
@@ -91,8 +97,31 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         setDrawMode('add');
         setCollisionCell(null);
         setMissionExpanded(true);
+        setKilometers(0);
+        setPoppedStation(null);
         stopTrainLoop();
     }, [level]);
+
+    // Calculate Kilometers whenever edges change
+    useEffect(() => {
+        let totalDist = 0;
+        // Iterate over unique edges (stored in edgeColors keys)
+        for (const key of edgeColors.keys()) {
+            const [p1, p2] = key.split('|');
+            const [x1, y1] = p1.split(',').map(Number);
+            const [x2, y2] = p2.split(',').map(Number);
+            
+            // Manhattan distance check is not enough, use Euclidean for diagonal check
+            // Orthogonal (dx+dy=1) -> 1km
+            // Diagonal (dx=1, dy=1) -> 1.5km (approx sqrt(2))
+            const dx = Math.abs(x1 - x2);
+            const dy = Math.abs(y1 - y2);
+            
+            if (dx + dy === 1) totalDist += 1.0;
+            else totalDist += 1.5;
+        }
+        setKilometers(parseFloat(totalDist.toFixed(1)));
+    }, [edgeColors]);
 
     // Clear collision effect
     useEffect(() => {
@@ -179,6 +208,13 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
             const cell = getGridCell(e.clientX, e.clientY);
             if (cell) {
                 lastDragCell.current = cell;
+                
+                // Station Interaction: Pop effect
+                const station = getStationAt(cell.x, cell.y);
+                if (station) {
+                    setPoppedStation(station.id);
+                    setTimeout(() => setPoppedStation(null), 800);
+                }
             }
         }
     };
@@ -362,7 +398,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         stopTrainLoop(); // STOP SOUND
         playWinSound(); 
         await new Promise(r => setTimeout(r, 1000));
-        onLevelComplete();
+        onLevelComplete({ kilometers });
     };
 
     return (
@@ -373,8 +409,18 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                 <div className="flex items-center justify-between px-3 py-2">
                     <div className="flex items-center gap-2">
                          <button onClick={() => { stopTrainLoop(); onExit(); }} className="p-1 rounded-full text-slate-400 hover:bg-slate-100"><ArrowLeft size={20}/></button>
-                         <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{level.city}</span>
+                         <div className="flex flex-col leading-tight">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{level.city}</span>
+                            <span className="text-sm font-black text-slate-900">NIVEL {String(level.difficulty).padStart(2, '0')}</span>
+                         </div>
                     </div>
+                    
+                    {/* KM Counter */}
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg border border-slate-200">
+                        <Ruler size={14} className="text-indigo-500"/>
+                        <span className="text-xs font-mono font-bold text-slate-700">{kilometers.toFixed(1)} km</span>
+                    </div>
+
                     <button 
                         onClick={() => setMissionExpanded(!missionExpanded)} 
                         className="flex items-center gap-1 text-slate-500 text-xs font-bold py-1 px-2 rounded hover:bg-slate-50"
@@ -396,6 +442,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
             {/* 2. Middle Area (Board) - Takes remaining space */}
             <div 
                 ref={containerRef}
+                id="game-board-container"
                 className="flex-1 w-full relative touch-none bg-slate-200 overflow-hidden cursor-crosshair"
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
@@ -451,6 +498,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                             const isStart = routeIndex === 0;
                             const isEnd = routeIndex === level.routeRequest.length - 1;
                             const isColliding = collisionCell?.x === x && collisionCell?.y === y;
+                            const isPopped = station && poppedStation === station.id;
 
                             return (
                                 <div key={i} className={`relative ${isColliding ? 'bg-red-200/50' : ''}`}>
@@ -486,9 +534,12 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                                                 )}
                                             </div>
                                             
-                                            {/* Station Labels - Bigger Text */}
-                                            <div className="absolute -top-[55%] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-                                                <div className="bg-slate-900/90 text-xs leading-none font-bold text-white px-2 py-1 rounded-md shadow-lg whitespace-nowrap backdrop-blur-sm border border-white/20">
+                                            {/* Station Labels - Bigger Text, Interactive Pop */}
+                                            <div className={`
+                                                absolute -top-[55%] left-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-200 ease-out origin-bottom
+                                                ${isPopped ? 'scale-150 z-50' : 'scale-100 z-40'}
+                                            `}>
+                                                <div className="bg-slate-900/90 text-sm leading-none font-bold text-white px-3 py-1.5 rounded-md shadow-lg whitespace-nowrap backdrop-blur-sm border border-white/20">
                                                     {station.name}
                                                 </div>
                                             </div>

@@ -44,6 +44,10 @@ export interface TrackState {
     connections: Map<string, string[]>;
 }
 
+export interface LevelStats {
+    kilometers: number;
+}
+
 export const CITIES = [
     "Buenos Aires",
     "Londres",

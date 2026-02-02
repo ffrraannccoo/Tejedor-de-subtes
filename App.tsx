@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { CITIES, LevelConfig } from './types';
+import { CITIES, LevelConfig, LevelStats } from './types';
 import { generateLevel } from './services/levelGenerator';
 import { initAudio } from './services/soundService';
 import Board from './components/Board';
-import { TrainFront, MapPin, PlayCircle, Loader2, Building2, Globe2, ChevronDown } from 'lucide-react';
+import { TrainFront, MapPin, PlayCircle, Loader2, Building2, Globe2, ChevronDown, Download, Share2 } from 'lucide-react';
+import { toJpeg } from 'html-to-image';
 
 enum AppState {
     MENU,
@@ -32,6 +33,8 @@ const App: React.FC = () => {
     const [currentLevel, setCurrentLevel] = useState<LevelConfig | null>(null);
     const [progress, setProgress] = useState<Record<string, number>>({});
     const [isShaking, setIsShaking] = useState(false);
+    const [lastLevelStats, setLastLevelStats] = useState<LevelStats | null>(null);
+    const [isExporting, setIsExporting] = useState(false);
 
     useEffect(() => {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -56,7 +59,8 @@ const App: React.FC = () => {
         setAppState(AppState.PLAYING);
     };
 
-    const handleLevelComplete = () => {
+    const handleLevelComplete = (stats: LevelStats) => {
+        setLastLevelStats(stats);
         setAppState(AppState.LEVEL_COMPLETE);
     };
 
@@ -81,11 +85,72 @@ const App: React.FC = () => {
         setTimeout(() => setIsShaking(false), 400);
     };
 
+    const handleExportImage = async () => {
+        const node = document.getElementById('game-board-container');
+        if (!node || isExporting) return;
+
+        setIsExporting(true);
+        try {
+            // Get raw JPEG data url from the DOM node
+            const dataUrl = await toJpeg(node, { 
+                quality: 0.9, 
+                backgroundColor: '#e2e8f0', // Slate-200 matching bg
+                cacheBust: true,
+            });
+
+            // Create a canvas to add branding/stats overlay
+            const img = new Image();
+            img.src = dataUrl;
+            await new Promise(r => { img.onload = r; });
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error("No canvas context");
+
+            // Add some footer space
+            const footerHeight = 60;
+            canvas.width = img.width;
+            canvas.height = img.height + footerHeight;
+
+            // Draw original image
+            ctx.drawImage(img, 0, 0);
+
+            // Draw Footer Background
+            ctx.fillStyle = '#1e293b'; // Slate 800
+            ctx.fillRect(0, img.height, canvas.width, footerHeight);
+
+            // Draw Text
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px sans-serif';
+            // Format: City - Level 0X
+            const levelText = `${selectedCity} - ${String(difficulty).padStart(2, '0')}`;
+            ctx.fillText(levelText, 20, img.height + 38);
+
+            ctx.fillStyle = '#cbd5e1'; // Slate 300
+            ctx.textAlign = 'right';
+            ctx.font = '20px sans-serif';
+            const km = lastLevelStats?.kilometers.toFixed(1) || '0.0';
+            ctx.fillText(`${km} km construidos`, canvas.width - 20, img.height + 38);
+
+            // Trigger Download
+            const link = document.createElement('a');
+            link.download = `subte-${selectedCity.toLowerCase()}-${difficulty}-${Date.now()}.jpg`;
+            link.href = canvas.toDataURL('image/jpeg', 0.9);
+            link.click();
+            
+        } catch (err) {
+            console.error('Failed to export image', err);
+            alert("No se pudo guardar la imagen.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     return (
         <div className={`h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 transition-colors ${isShaking ? 'collision-shake' : ''}`}>
             
             {/* Conditional Header - Hidden during gameplay */}
-            {appState !== AppState.PLAYING && appState !== AppState.MENU && (
+            {appState !== AppState.PLAYING && appState !== AppState.LEVEL_COMPLETE && appState !== AppState.MENU && (
                 <header className="px-4 py-3 bg-white border-b border-slate-200 shadow-sm shrink-0 z-50">
                     <div className="max-w-6xl mx-auto flex justify-between items-center">
                         <div 
@@ -182,8 +247,9 @@ const App: React.FC = () => {
                     </div>
                 )}
 
-                {appState === AppState.PLAYING && currentLevel && (
-                    <div className="w-full h-full flex flex-col animate-in fade-in duration-500 bg-slate-50">
+                {/* Game Board - Kept mounted during LEVEL_COMPLETE for screenshotting */}
+                {(appState === AppState.PLAYING || appState === AppState.LEVEL_COMPLETE) && currentLevel && (
+                    <div className="absolute inset-0 w-full h-full flex flex-col bg-slate-50 z-0">
                         <Board 
                             level={currentLevel} 
                             onLevelComplete={handleLevelComplete} 
@@ -199,10 +265,37 @@ const App: React.FC = () => {
                              <div className="inline-flex items-center justify-center w-20 h-20 bg-emerald-100 rounded-full shadow-inner animate-bounce">
                                 <TrainFront size={40} className="text-emerald-600" />
                             </div>
-                            <h2 className="text-3xl font-black text-slate-900 tracking-tight">¡EXCELENTE!</h2>
+                            
+                            <div>
+                                <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">¡EXCELENTE!</h2>
+                                <p className="text-slate-500 text-sm font-medium">
+                                    Completaste el recorrido en {selectedCity}.
+                                </p>
+                            </div>
+
+                            {/* Stats Box */}
+                            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col items-center gap-1">
+                                <span className="text-xs uppercase font-bold text-slate-400 tracking-widest">Infraestructura</span>
+                                <div className="text-2xl font-black text-slate-700">
+                                    {lastLevelStats?.kilometers.toFixed(1)} <span className="text-lg text-slate-400">km</span>
+                                </div>
+                            </div>
+
                             <div className="flex flex-col gap-3">
-                                <button onClick={handleNextLevel} className="w-full py-4 rounded-xl bg-slate-900 text-white font-bold shadow-lg active:scale-95 transition-transform">Siguiente Nivel</button>
-                                <button onClick={handleBackToMenu} className="w-full py-4 rounded-xl border-2 border-slate-200 text-slate-600 font-bold hover:bg-slate-50">Volver al Menú</button>
+                                <button 
+                                    onClick={handleExportImage}
+                                    disabled={isExporting}
+                                    className="w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold border border-indigo-200 flex items-center justify-center gap-2 active:bg-indigo-100 transition-colors"
+                                >
+                                    {isExporting ? <Loader2 size={18} className="animate-spin"/> : <Download size={18} />}
+                                    Guardar Mapa
+                                </button>
+                                <button onClick={handleNextLevel} className="w-full py-4 rounded-xl bg-slate-900 text-white font-bold shadow-lg active:scale-95 transition-transform">
+                                    Siguiente Nivel
+                                </button>
+                                <button onClick={handleBackToMenu} className="w-full py-4 rounded-xl border-2 border-slate-200 text-slate-600 font-bold hover:bg-slate-50">
+                                    Volver al Menú
+                                </button>
                             </div>
                         </div>
                     </div>
