@@ -112,12 +112,9 @@ const App: React.FC = () => {
                         {/* Dramatic Background Image with Animation and Fallback Gradient */}
                         <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-950 to-black">
                             <img 
-                                src="./intro.jpg" 
+                                src="/intro.jpg" 
                                 className="w-full h-full object-cover opacity-60 scale-105 animate-[pulse_10s_ease-in-out_infinite]"
                                 alt="Subway Tunnel"
-                                onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                }}
                             />
                             {/* Overlay Gradient */}
                             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/80 to-slate-900/40"></div>
