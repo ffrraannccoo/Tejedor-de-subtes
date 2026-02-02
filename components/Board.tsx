@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CellType, LevelConfig, Station, Coordinate } from '../types';
 import { getKey, findPath } from '../utils/pathfinding';
 import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
@@ -44,36 +44,34 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
     const isDraggingView = useRef<boolean>(false);
     const lastDragCell = useRef<Coordinate | null>(null);
 
-    // --- Auto-Fit Logic ---
+    // --- Auto-Fit Logic (Extracted for reuse) ---
+    const fitBoard = useCallback(() => {
+        if (containerRef.current) {
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            if (width === 0 || height === 0) return;
+
+            const boardSize = GRID_SIZE * CELL_SIZE;
+            const padding = 20; // Internal padding
+            
+            // Calculate scale to fit completely within the flex-1 container
+            const scaleX = (width - padding) / boardSize;
+            const scaleY = (height - padding) / boardSize;
+            const initialScale = Math.min(scaleX, scaleY, 1.2); // Cap zoom at 1.2
+            
+            const x = (width - boardSize * initialScale) / 2;
+            const y = (height - boardSize * initialScale) / 2;
+            
+            setTransform({ x, y, scale: initialScale });
+        }
+    }, [level]); // Re-calculate if level changes
+
+    // Initial fit and resize listener
     useEffect(() => {
-        const fitBoard = () => {
-            if (containerRef.current) {
-                const { width, height } = containerRef.current.getBoundingClientRect();
-                if (width === 0 || height === 0) return;
-
-                const boardSize = GRID_SIZE * CELL_SIZE;
-                const padding = 20; // Internal padding
-                
-                // Calculate scale to fit completely within the flex-1 container
-                const scaleX = (width - padding) / boardSize;
-                const scaleY = (height - padding) / boardSize;
-                const initialScale = Math.min(scaleX, scaleY, 1.2); // Cap zoom at 1.2
-                
-                const x = (width - boardSize * initialScale) / 2;
-                const y = (height - boardSize * initialScale) / 2;
-                
-                setTransform({ x, y, scale: initialScale });
-            }
-        };
-
-        // Run immediately and on resize
         fitBoard();
         window.addEventListener('resize', fitBoard);
-        // Short delay to allow layout to settle
-        setTimeout(fitBoard, 100);
-
+        setTimeout(fitBoard, 100); // Delay for layout settling
         return () => window.removeEventListener('resize', fitBoard);
-    }, [level]); // Re-run when level changes
+    }, [fitBoard]);
 
     // Reset game state on level change
     useEffect(() => {
@@ -230,7 +228,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         if (neighbors.length === 0) return null;
 
         const center = CELL_SIZE / 2;
-        const thickness = 10;
+        const thickness = 12; // Thicker tracks for better visibility
         const elements: React.ReactElement[] = [];
 
         const getColor = (k2: string) => {
@@ -432,33 +430,35 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                                         </svg>
                                     </div>
 
+                                    {/* Obstacles: Bigger Icons */}
                                     {obs && (
                                         <div className={`absolute inset-0 flex items-center justify-center z-20 ${isColliding ? 'scale-110' : ''}`}>
-                                            <div className="bg-white/90 p-1 rounded-lg shadow-sm border border-slate-100">
-                                                {obs.type === CellType.OBSTACLE_WATER && <Droplets size={CELL_SIZE * 0.5} className="text-sky-500" />}
-                                                {obs.type === CellType.OBSTACLE_FOSSIL && <Skull size={CELL_SIZE * 0.5} className="text-amber-600" />}
-                                                {obs.type === CellType.OBSTACLE_TUNNEL && <Pickaxe size={CELL_SIZE * 0.5} className="text-slate-400" />}
+                                            <div className="bg-white/90 p-1 rounded-xl shadow-sm border border-slate-100">
+                                                {obs.type === CellType.OBSTACLE_WATER && <Droplets size={CELL_SIZE * 0.7} className="text-sky-500" />}
+                                                {obs.type === CellType.OBSTACLE_FOSSIL && <Skull size={CELL_SIZE * 0.7} className="text-amber-600" />}
+                                                {obs.type === CellType.OBSTACLE_TUNNEL && <Pickaxe size={CELL_SIZE * 0.7} className="text-slate-400" />}
                                             </div>
                                         </div>
                                     )}
 
+                                    {/* Stations: Bigger Circles & Text */}
                                     {station && (
                                         <div className="absolute inset-0 flex items-center justify-center z-30">
                                             <div className={`
-                                                rounded-full border-[3px] flex items-center justify-center bg-white shadow-md z-10
-                                                ${isStart ? 'border-emerald-500 w-[65%] h-[65%]' : 
-                                                  isEnd ? 'border-rose-500 w-[65%] h-[65%]' : 
-                                                  routeIndex > 0 ? 'border-amber-400 w-[55%] h-[55%]' :
-                                                   'border-slate-300 w-[45%] h-[45%]'}
+                                                rounded-full border-[5px] flex items-center justify-center bg-white shadow-md z-10
+                                                ${isStart ? 'border-emerald-500 w-[85%] h-[85%]' : 
+                                                  isEnd ? 'border-rose-500 w-[85%] h-[85%]' : 
+                                                  routeIndex > 0 ? 'border-amber-400 w-[75%] h-[75%]' :
+                                                   'border-slate-300 w-[60%] h-[60%]'}
                                             `}>
                                                 {routeIndex !== -1 && (
-                                                    <span className="text-sm font-black text-slate-700">{routeIndex + 1}</span>
+                                                    <span className="text-base font-black text-slate-800">{routeIndex + 1}</span>
                                                 )}
                                             </div>
                                             
-                                            {/* Station Labels - Always visible, scaled down slightly visually */}
+                                            {/* Station Labels - Bigger Text */}
                                             <div className="absolute -top-[55%] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-                                                <div className="bg-slate-900/80 text-[10px] leading-tight font-bold text-white px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap backdrop-blur-sm">
+                                                <div className="bg-slate-900/90 text-xs leading-none font-bold text-white px-2 py-1 rounded-md shadow-lg whitespace-nowrap backdrop-blur-sm border border-white/20">
                                                     {station.name}
                                                 </div>
                                             </div>
@@ -480,8 +480,8 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                                 display: 'flex', alignItems: 'center', justifyContent: 'center'
                             }}
                         >
-                            <div className="bg-yellow-400 text-black p-1.5 rounded-lg shadow-xl scale-110 ring-2 ring-white">
-                                <TrainFront size={CELL_SIZE * 0.6} fill="currentColor" />
+                            <div className="bg-yellow-400 text-black p-2 rounded-xl shadow-xl scale-125 ring-2 ring-white">
+                                <TrainFront size={CELL_SIZE * 0.7} fill="currentColor" />
                             </div>
                         </div>
                     )}
@@ -512,8 +512,13 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                         </button>
                      </div>
 
+                    {/* Reset Button: Clears + Resets View */}
                     <button 
-                        onClick={() => { setConnections(new Map()); setEdgeColors(new Map()); }}
+                        onClick={() => { 
+                            setConnections(new Map()); 
+                            setEdgeColors(new Map());
+                            fitBoard(); // Reset viewport
+                        }}
                         className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:text-rose-600 active:bg-slate-200"
                     >
                         <RotateCcw size={18} />
