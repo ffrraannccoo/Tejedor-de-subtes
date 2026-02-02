@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CellType, LevelConfig, Station, Coordinate } from '../types';
 import { getKey, findPath } from '../utils/pathfinding';
+import { playBuildSound, playCollisionSound, playWinSound, playTrainWhistle, initAudio, startTrainLoop, stopTrainLoop } from '../services/soundService';
 import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
 
 interface BoardProps {
@@ -73,6 +74,13 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         return () => window.removeEventListener('resize', fitBoard);
     }, [fitBoard]);
 
+    // Cleanup audio on unmount
+    useEffect(() => {
+        return () => {
+            stopTrainLoop();
+        };
+    }, []);
+
     // Reset game state on level change
     useEffect(() => {
         setConnections(new Map());
@@ -83,6 +91,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         setDrawMode('add');
         setCollisionCell(null);
         setMissionExpanded(true);
+        stopTrainLoop();
     }, [level]);
 
     // Clear collision effect
@@ -99,23 +108,33 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
     const getEdgeKey = (c1: Coordinate, c2: Coordinate) => [getKey(c1.x, c1.y), getKey(c2.x, c2.y)].sort().join('|');
 
     const modifyConnection = (c1: Coordinate, c2: Coordinate, mode: 'add' | 'remove') => {
-        if (isObstacle(c1.x, c1.y)) { setCollisionCell(c1); onCollision(); return; }
-        if (isObstacle(c2.x, c2.y)) { setCollisionCell(c2); onCollision(); return; }
+        if (isObstacle(c1.x, c1.y)) { setCollisionCell(c1); playCollisionSound(); onCollision(); return; }
+        if (isObstacle(c2.x, c2.y)) { setCollisionCell(c2); playCollisionSound(); onCollision(); return; }
 
         const k1 = getKey(c1.x, c1.y);
         const k2 = getKey(c2.x, c2.y);
         const edgeKey = getEdgeKey(c1, c2);
 
+        // Check if change is needed BEFORE setting state to trigger sound correctly
+        const n1 = connections.get(k1) || [];
+        const n2 = connections.get(k2) || [];
+        const alreadyConnected = n1.includes(k2);
+
+        // Sound Logic
+        if (mode === 'add' && !alreadyConnected) {
+            playBuildSound();
+        }
+
         setConnections(prev => {
             const newMap = new Map<string, string[]>(prev);
-            const n1 = newMap.get(k1) || [];
-            const n2 = newMap.get(k2) || [];
+            const prevN1 = newMap.get(k1) || [];
+            const prevN2 = newMap.get(k2) || [];
             if (mode === 'add') {
-                if (!n1.includes(k2)) newMap.set(k1, [...n1, k2]);
-                if (!n2.includes(k1)) newMap.set(k2, [...n2, k1]);
+                if (!prevN1.includes(k2)) newMap.set(k1, [...prevN1, k2]);
+                if (!prevN2.includes(k1)) newMap.set(k2, [...prevN2, k1]);
             } else {
-                newMap.set(k1, n1.filter(k => k !== k2));
-                newMap.set(k2, n2.filter(k => k !== k1));
+                newMap.set(k1, prevN1.filter(k => k !== k2));
+                newMap.set(k2, prevN2.filter(k => k !== k1));
             }
             return newMap;
         });
@@ -145,6 +164,9 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
     };
 
     const handlePointerDown = (e: React.PointerEvent) => {
+        // Ensure audio context is ready on first touch
+        initAudio(); 
+        
         (e.target as Element).setPointerCapture(e.pointerId);
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -300,6 +322,10 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         setIsSimulating(true);
         setSimulationMessage("Revisando...");
         setMissionExpanded(false); // Collapse header on start
+        
+        // Start Sound Sequence
+        playTrainWhistle(); 
+        startTrainLoop(); 
 
         const routeIds = level.routeRequest;
         let fullPath: Coordinate[] = [];
@@ -318,6 +344,8 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
             if (!segmentPath) {
                 setSimulationMessage(`Sin camino: ${startStation.name} -> ${endStation.name}`);
                 setIsSimulating(false);
+                stopTrainLoop(); // STOP SOUND
+                playCollisionSound(); 
                 return;
             }
             if (i > 0) segmentPath.shift(); 
@@ -331,6 +359,8 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
         }
 
         setSimulationMessage("¡Llegamos!");
+        stopTrainLoop(); // STOP SOUND
+        playWinSound(); 
         await new Promise(r => setTimeout(r, 1000));
         onLevelComplete();
     };
@@ -342,7 +372,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
             <div className="bg-white shrink-0 shadow-sm z-30 border-b border-slate-200">
                 <div className="flex items-center justify-between px-3 py-2">
                     <div className="flex items-center gap-2">
-                         <button onClick={onExit} className="p-1 rounded-full text-slate-400 hover:bg-slate-100"><ArrowLeft size={20}/></button>
+                         <button onClick={() => { stopTrainLoop(); onExit(); }} className="p-1 rounded-full text-slate-400 hover:bg-slate-100"><ArrowLeft size={20}/></button>
                          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{level.city}</span>
                     </div>
                     <button 
@@ -449,7 +479,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision, onEx
                                                 ${isStart ? 'border-emerald-500 w-[85%] h-[85%]' : 
                                                   isEnd ? 'border-rose-500 w-[85%] h-[85%]' : 
                                                   routeIndex > 0 ? 'border-amber-400 w-[75%] h-[75%]' :
-                                                   'border-slate-300 w-[60%] h-[60%]'}
+                                                   'border-slate-300 w-[60%] h-[60%]' }
                                             `}>
                                                 {routeIndex !== -1 && (
                                                     <span className="text-base font-black text-slate-800">{routeIndex + 1}</span>
