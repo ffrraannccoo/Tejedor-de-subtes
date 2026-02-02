@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CellType, LevelConfig, Station, Coordinate } from '../types';
 import { getKey, findPath } from '../utils/pathfinding';
-import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, ZoomIn, ZoomOut } from 'lucide-react';
+import { TrainFront, Pickaxe, Droplets, Skull, Play, RotateCcw, Eraser, Pencil, Info } from 'lucide-react';
 
 interface BoardProps {
     level: LevelConfig;
@@ -9,8 +9,9 @@ interface BoardProps {
     onCollision: () => void;
 }
 
-const GRID_SIZE = 20;
-const CELL_SIZE = 40; // Increased base size for better visibility
+// Adjusted constants for Mobile First
+const GRID_SIZE = 15; // Reduced from 20 for better density on phone
+const CELL_SIZE = 60; // Increased size for easier tapping
 
 const TRACK_COLORS = [
     { name: 'A', hex: '#38bdf8' }, // Light Blue
@@ -33,11 +34,11 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     const [isSimulating, setIsSimulating] = useState(false);
     const [trainPosition, setTrainPosition] = useState<Coordinate | null>(null);
     const [simulationMessage, setSimulationMessage] = useState<string | null>(null);
+    const [showMission, setShowMission] = useState(true); // Toggle mission details
 
     // --- Viewport / Gesture State ---
     const containerRef = useRef<HTMLDivElement>(null);
-    const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
-    // Track active pointers for multi-touch
+    const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.8 }); // Default zoom out slightly to see more context
     const pointers = useRef<Map<number, { x: number, y: number }>>(new Map());
     const prevPinchDiff = useRef<number>(-1);
     const isDraggingView = useRef<boolean>(false);
@@ -50,10 +51,9 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             const boardWidth = GRID_SIZE * CELL_SIZE;
             const boardHeight = GRID_SIZE * CELL_SIZE;
             
-            // Center the board and add a bit of scale down if screen is small
-            const initialScale = Math.min(width / boardWidth, height / boardHeight, 1) * 0.9;
+            const initialScale = Math.min(width / boardWidth, height / boardHeight, 1) * 0.85; // Leave room for UI
             const x = (width - boardWidth * initialScale) / 2;
-            const y = (height - boardHeight * initialScale) / 2;
+            const y = (height - boardHeight * initialScale) / 2 - 50; // Offset up slightly for bottom bar
             
             setTransform({ x, y, scale: initialScale });
         }
@@ -68,6 +68,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         setSimulationMessage(null);
         setDrawMode('add');
         setCollisionCell(null);
+        setShowMission(true);
     }, [level]);
 
     // Clear collision effect
@@ -77,6 +78,14 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             return () => clearTimeout(timer);
         }
     }, [collisionCell]);
+
+    // Auto-hide mission after 4 seconds
+    useEffect(() => {
+        if (showMission) {
+            const timer = setTimeout(() => setShowMission(false), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [showMission]);
 
     // --- Logic Helpers ---
     const isObstacle = (x: number, y: number) => level.obstacles.some(o => o.x === x && o.y === y);
@@ -113,13 +122,10 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     };
 
     // --- Gesture & Pointer Logic ---
-
-    // Convert screen coordinates to Grid coordinates
     const getGridCell = (clientX: number, clientY: number) => {
         if (!containerRef.current) return null;
         const rect = containerRef.current.getBoundingClientRect();
         
-        // Calculate position relative to the transformed div (0,0 of the board)
         const relX = (clientX - rect.left - transform.x) / transform.scale;
         const relY = (clientY - rect.top - transform.y) / transform.scale;
 
@@ -133,19 +139,14 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     };
 
     const handlePointerDown = (e: React.PointerEvent) => {
-        // Capture pointer to track it outside element if needed
         (e.target as Element).setPointerCapture(e.pointerId);
-        
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        // Logic branching based on number of fingers
         if (pointers.current.size === 2) {
-            // Two fingers = Pan/Zoom Mode
             isDraggingView.current = true;
-            lastDragCell.current = null; // Cancel drawing
-            prevPinchDiff.current = -1; // Reset pinch
+            lastDragCell.current = null;
+            prevPinchDiff.current = -1;
         } else if (pointers.current.size === 1 && !isSimulating) {
-            // One finger = Draw Mode
             isDraggingView.current = false;
             const cell = getGridCell(e.clientX, e.clientY);
             if (cell) {
@@ -156,65 +157,42 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
 
     const handlePointerMove = (e: React.PointerEvent) => {
         if (!pointers.current.has(e.pointerId)) return;
-        
-        // Update current pointer position
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
         if (pointers.current.size === 2) {
-            // --- Multi-touch (Pan & Zoom) ---
+            // Multi-touch Pan & Zoom
             const values = Array.from(pointers.current.values());
-            const p1 = values[0];
-            const p2 = values[1];
+            const p1 = values[0] as { x: number; y: number };
+            const p2 = values[1] as { x: number; y: number };
 
-            // 1. Calculate Pinch Distance (Zoom)
             const dx = p2.x - p1.x;
             const dy = p2.y - p1.y;
             const distance = Math.sqrt(dx*dx + dy*dy);
 
             if (prevPinchDiff.current > 0) {
                 const delta = distance - prevPinchDiff.current;
-                const zoomFactor = delta * 0.005; // Sensitivity
-                
+                const zoomFactor = delta * 0.005;
                 setTransform(prev => ({
                     ...prev,
-                    scale: Math.min(Math.max(0.5, prev.scale + zoomFactor), 4)
+                    scale: Math.min(Math.max(0.4, prev.scale + zoomFactor), 3)
                 }));
             }
             prevPinchDiff.current = distance;
 
-            // 2. Calculate Midpoint Movement (Pan)
-            // We can determine pan by checking how the center of the two fingers moved
-            // But simple implementation: allow panning if fingers move roughly same direction?
-            // Easier approach for reliability: Calculate center of the pinch
-            // const centerX = (p1.x + p2.x) / 2;
-            // const centerY = (p1.y + p2.y) / 2;
-            
-            // To properly implement continuous pan with pinch is complex without a lib.
-            // Simplified: We just use the movement of the primary pointer to pan if needed, 
-            // OR strictly separate pan (2 fingers moving parallel) vs pinch.
-            // Let's implement a basic delta Pan based on the "center" of the touch points.
-            // (Requires tracking previous center, we'll skip complex pan-while-zoom for simplicity in this prompt context
-            // and just allow "Two fingers to scroll" -> treating it as a pan).
-            
-            // Simple Pan Implementation using e.movementX/Y doesn't work well on mobile.
-            // We'll rely on one of the pointers for panning the view
-            const moveX = e.movementX;
-            const moveY = e.movementY;
+            // Pan
             setTransform(prev => ({
                 ...prev,
-                x: prev.x + moveX,
-                y: prev.y + moveY
+                x: prev.x + e.movementX,
+                y: prev.y + e.movementY
             }));
 
         } else if (pointers.current.size === 1 && !isDraggingView.current && !isSimulating) {
-            // --- Single Touch (Draw) ---
+            // Draw
             const cell = getGridCell(e.clientX, e.clientY);
             if (!cell || !lastDragCell.current) return;
 
-            // If same cell, ignore
             if (cell.x === lastDragCell.current.x && cell.y === lastDragCell.current.y) return;
 
-            // Check distance
             const dx = Math.abs(cell.x - lastDragCell.current.x);
             const dy = Math.abs(cell.y - lastDragCell.current.y);
 
@@ -222,7 +200,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 modifyConnection(lastDragCell.current, cell, drawMode);
                 lastDragCell.current = cell;
             } else {
-                // Dragged too fast or outside grid, update cursor but don't draw line
                 lastDragCell.current = cell;
             }
         }
@@ -231,7 +208,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     const handlePointerUp = (e: React.PointerEvent) => {
         pointers.current.delete(e.pointerId);
         (e.target as Element).releasePointerCapture(e.pointerId);
-
         if (pointers.current.size < 2) {
             isDraggingView.current = false;
             prevPinchDiff.current = -1;
@@ -248,7 +224,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
         if (neighbors.length === 0) return null;
 
         const center = CELL_SIZE / 2;
-        const thickness = 6;
+        const thickness = 10; // Thicker lines for mobile
         const elements: React.ReactElement[] = [];
 
         const getColor = (k2: string) => {
@@ -265,11 +241,8 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
 
             const [ax, ay] = kA.split(',').map(Number);
             const colorA = getColor(kA);
-            
-            // Calculate Vector Direction
             const dxA = ax - x;
             const dyA = ay - y;
-
             const txA = center + (dxA * center);
             const tyA = center + (dyA * center);
 
@@ -285,7 +258,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 if (colorA === colorB) {
                     const dxB = bx - x;
                     const dyB = by - y;
-
                     const isOrthoA = (Math.abs(dxA) + Math.abs(dyA) === 1);
                     const isOrthoB = (Math.abs(dxB) + Math.abs(dyB) === 1);
                     
@@ -293,21 +265,21 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                         const txB = center + (dxB * center);
                         const tyB = center + (dyB * center);
                         const pathD = `M ${txA} ${tyA} Q ${center} ${center} ${txB} ${tyB}`;
-                        elements.push(<g key={`curve-${kA}-${kB}`}><path d={pathD} stroke="white" strokeWidth={thickness + 4} fill="none" strokeLinecap="round" /><path d={pathD} stroke={colorA} strokeWidth={thickness} fill="none" strokeLinecap="round" /></g>);
+                        elements.push(<g key={`curve-${kA}-${kB}`}><path d={pathD} stroke="white" strokeWidth={thickness + 6} fill="none" strokeLinecap="round" /><path d={pathD} stroke={colorA} strokeWidth={thickness} fill="none" strokeLinecap="round" /></g>);
                         processed.add(kA); processed.add(kB); matchedCurve = true; break;
                     }
                     else if (isOrthoA && isOrthoB && (dxA === -dxB && dyA === -dyB)) {
                          const txB = center + (dxB * center);
                          const tyB = center + (dyB * center);
                          const pathD = `M ${txA} ${tyA} L ${txB} ${tyB}`;
-                         elements.push(<g key={`straight-${kA}-${kB}`}><path d={pathD} stroke="white" strokeWidth={thickness + 4} fill="none" /><path d={pathD} stroke={colorA} strokeWidth={thickness} fill="none" /></g>);
+                         elements.push(<g key={`straight-${kA}-${kB}`}><path d={pathD} stroke="white" strokeWidth={thickness + 6} fill="none" /><path d={pathD} stroke={colorA} strokeWidth={thickness} fill="none" /></g>);
                          processed.add(kA); processed.add(kB); matchedCurve = true; break;
                     }
                 }
             }
             if (!matchedCurve) {
                 const d = `M ${center} ${center} L ${txA} ${tyA}`;
-                elements.push(<g key={`seg-${kA}`}><path d={d} stroke="white" strokeWidth={thickness + 4} fill="none" strokeLinecap="round" /><path d={d} stroke={colorA} strokeWidth={thickness} fill="none" strokeLinecap="round" /></g>);
+                elements.push(<g key={`seg-${kA}`}><path d={d} stroke="white" strokeWidth={thickness + 6} fill="none" strokeLinecap="round" /><path d={d} stroke={colorA} strokeWidth={thickness} fill="none" strokeLinecap="round" /></g>);
                 processed.add(kA);
             }
         }
@@ -322,7 +294,8 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
     const startSimulation = async () => {
         if (isSimulating) return;
         setIsSimulating(true);
-        setSimulationMessage("Revisando las vías...");
+        setSimulationMessage("Revisando...");
+        setShowMission(false);
 
         const routeIds = level.routeRequest;
         let fullPath: Coordinate[] = [];
@@ -339,7 +312,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             );
 
             if (!segmentPath) {
-                setSimulationMessage(`Cortado el paso entre ${startStation.name} y ${endStation.name}`);
+                setSimulationMessage(`Sin camino: ${startStation.name} -> ${endStation.name}`);
                 setIsSimulating(false);
                 return;
             }
@@ -353,85 +326,35 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
             await new Promise(r => setTimeout(r, 120));
         }
 
-        setSimulationMessage("¡Llegamos joya!");
+        setSimulationMessage("¡Llegamos!");
         await new Promise(r => setTimeout(r, 1000));
         onLevelComplete();
     };
 
     return (
-        <div className="flex flex-col w-full h-full relative overflow-hidden bg-slate-100">
+        <div className="flex flex-col w-full h-full relative overflow-hidden bg-slate-200">
             
-            {/* Control Panel (Floating) */}
-            <div className="absolute top-0 left-0 right-0 z-50 p-2 md:p-4 pointer-events-none">
-                 <div className="bg-white/95 backdrop-blur shadow-lg border border-slate-200 rounded-2xl p-3 md:p-4 pointer-events-auto max-w-4xl mx-auto">
-                    <div className="flex flex-col gap-3">
-                        <div className="flex justify-between items-start">
-                             <div>
-                                <h3 className="font-bold text-slate-800 text-sm md:text-base">Misión: {level.city}</h3>
-                                <p className="text-xs text-slate-500 line-clamp-2 md:line-clamp-none leading-tight">{level.description}</p>
-                             </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1">
-                             {/* Colors */}
-                            <div className="flex gap-1.5 shrink-0">
-                                {TRACK_COLORS.map(c => (
-                                    <button
-                                        key={c.name}
-                                        onClick={() => { setActiveColor(c.hex); setDrawMode('add'); }}
-                                        className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center transition-transform ${
-                                            activeColor === c.hex && drawMode === 'add' ? 'ring-2 ring-slate-900 scale-110' : 'hover:scale-105'
-                                        }`}
-                                        style={{ backgroundColor: c.hex }}
-                                    >
-                                        <span className="text-[10px] font-bold text-white">{c.name}</span>
-                                    </button>
-                                ))}
-                            </div>
-
-                            <div className="w-px h-8 bg-slate-200 shrink-0 mx-1"></div>
-
-                            {/* Tools */}
-                            <div className="flex gap-2 shrink-0">
-                                <button
-                                    onClick={() => setDrawMode(drawMode === 'add' ? 'remove' : 'add')}
-                                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                                        drawMode === 'remove' ? 'bg-rose-100 text-rose-700 ring-2 ring-rose-300' : 'bg-slate-100 text-slate-600'
-                                    }`}
-                                >
-                                    {drawMode === 'remove' ? <Eraser size={20} /> : <Pencil size={20} />}
-                                </button>
-                                <button 
-                                    onClick={() => { setConnections(new Map()); setEdgeColors(new Map()); }}
-                                    className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center"
-                                >
-                                    <RotateCcw size={20} />
-                                </button>
-                                <button 
-                                    onClick={startSimulation}
-                                    disabled={isSimulating}
-                                    className={`h-10 px-4 rounded-xl font-bold text-sm flex items-center gap-2 ${
-                                        isSimulating ? 'bg-slate-100 text-slate-400' : 'bg-indigo-600 text-white shadow-md'
-                                    }`}
-                                >
-                                    {isSimulating ? '...' : 'Go'} <Play size={16} fill="currentColor" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+            {/* Top Info Overlay (Collapsible) */}
+            <div className={`absolute top-2 left-2 right-2 z-40 transition-all duration-300 ${showMission ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+                 <div className="bg-white/95 backdrop-blur shadow-md border border-slate-200 rounded-2xl p-4 max-w-md mx-auto">
+                     <div className="flex justify-between items-start mb-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{level.city}</span>
+                        <button onClick={() => setShowMission(false)} className="text-slate-400 hover:text-slate-600"><Info size={16}/></button>
+                     </div>
+                     <p className="text-sm text-slate-700 font-medium leading-relaxed">{level.description}</p>
                  </div>
-
-                 {simulationMessage && (
-                    <div className="mt-2 flex justify-center">
-                        <div className={`px-4 py-2 rounded-full text-sm font-bold shadow-lg animate-in fade-in slide-in-from-top-4 ${
-                            simulationMessage.includes("Cortado") ? "bg-rose-500 text-white" : "bg-emerald-500 text-white"
-                        }`}>
-                            {simulationMessage}
-                        </div>
-                    </div>
-                )}
             </div>
-            
+
+            {/* Toggle Info Button (when hidden) */}
+            {!showMission && !isSimulating && (
+                <button 
+                    onClick={() => setShowMission(true)}
+                    className="absolute top-4 left-4 z-40 bg-white p-2 rounded-full shadow-md text-slate-500"
+                >
+                    <Info size={24} />
+                </button>
+            )}
+
             {/* Viewport Container */}
             <div 
                 ref={containerRef}
@@ -442,7 +365,17 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 onPointerCancel={handlePointerUp}
                 onPointerLeave={handlePointerUp}
             >
-                {/* Transformed Board */}
+                {/* Simulation Message */}
+                {simulationMessage && (
+                    <div className="absolute top-20 left-0 right-0 z-50 flex justify-center pointer-events-none">
+                        <div className={`px-6 py-2 rounded-full text-base font-bold shadow-xl animate-in fade-in zoom-in ${
+                            simulationMessage.includes("Sin camino") ? "bg-rose-500 text-white" : "bg-emerald-500 text-white"
+                        }`}>
+                            {simulationMessage}
+                        </div>
+                    </div>
+                )}
+
                 <div 
                     style={{ 
                         transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
@@ -450,18 +383,17 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                         width: GRID_SIZE * CELL_SIZE,
                         height: GRID_SIZE * CELL_SIZE,
                     }}
-                    className="absolute bg-white shadow-2xl"
+                    className="absolute bg-white shadow-2xl rounded-sm"
                 >
-                    {/* Grid Pattern */}
                     <div className="absolute inset-0 opacity-10 pointer-events-none"
                          style={{
-                            backgroundImage: 'radial-gradient(#64748b 1.5px, transparent 1.5px)',
+                            backgroundImage: 'radial-gradient(#64748b 2px, transparent 2px)',
                             backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
                             backgroundPosition: `${CELL_SIZE/2}px ${CELL_SIZE/2}px`
                          }}>
                     </div>
 
-                    {/* Cells */}
+                    {/* Grid Render */}
                     <div 
                         className="absolute inset-0 grid pointer-events-none"
                         style={{ 
@@ -485,17 +417,15 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
 
                             return (
                                 <div key={i} className={`relative ${isColliding ? 'bg-red-200/50' : ''}`}>
-                                    {/* Tracks */}
                                     <div className="absolute inset-0 z-10">
                                         <svg width="100%" height="100%" overflow="visible">
                                             {renderTrackSVG(x, y)}
                                         </svg>
                                     </div>
 
-                                    {/* Obstacles */}
                                     {obs && (
                                         <div className={`absolute inset-0 flex items-center justify-center z-20 ${isColliding ? 'scale-110' : ''}`}>
-                                            <div className="bg-white/90 p-1 rounded-md shadow-sm border border-slate-100">
+                                            <div className="bg-white/90 p-1.5 rounded-lg shadow-sm border border-slate-100">
                                                 {obs.type === CellType.OBSTACLE_WATER && <Droplets size={CELL_SIZE * 0.5} className="text-sky-500" />}
                                                 {obs.type === CellType.OBSTACLE_FOSSIL && <Skull size={CELL_SIZE * 0.5} className="text-amber-600" />}
                                                 {obs.type === CellType.OBSTACLE_TUNNEL && <Pickaxe size={CELL_SIZE * 0.5} className="text-slate-400" />}
@@ -503,24 +433,22 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                                         </div>
                                     )}
 
-                                    {/* Stations */}
                                     {station && (
                                         <div className="absolute inset-0 flex items-center justify-center z-30">
                                             <div className={`
-                                                rounded-full border-[3px] flex items-center justify-center bg-white shadow-md z-10
+                                                rounded-full border-[4px] flex items-center justify-center bg-white shadow-md z-10
                                                 ${isStart ? 'border-emerald-500 w-[70%] h-[70%]' : 
                                                   isEnd ? 'border-rose-500 w-[70%] h-[70%]' : 
                                                   routeIndex > 0 ? 'border-amber-400 w-[60%] h-[60%]' :
                                                   isCombination ? 'border-slate-800 w-[60%] h-[60%]' : 'border-slate-300 w-[50%] h-[50%]'}
                                             `}>
                                                 {routeIndex !== -1 && (
-                                                    <span className="text-[10px] font-bold text-slate-700">{routeIndex + 1}</span>
+                                                    <span className="text-sm font-black text-slate-700">{routeIndex + 1}</span>
                                                 )}
                                             </div>
                                             
-                                            {/* Label - Fixed scale inverse to zoom to keep readable? No, let it zoom. */}
-                                            <div className="absolute -top-[80%] left-1/2 -translate-x-1/2 z-40">
-                                                <div className="bg-white/90 text-[8px] md:text-[10px] font-bold text-slate-800 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap border border-slate-200/50">
+                                            <div className="absolute -top-[70%] left-1/2 -translate-x-1/2 z-40">
+                                                <div className="bg-slate-900/90 text-xs font-bold text-white px-2 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
                                                     {station.name}
                                                 </div>
                                             </div>
@@ -531,7 +459,6 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                         })}
                     </div>
 
-                    {/* Train */}
                     {trainPosition && (
                         <div 
                             className="absolute z-50 transition-all duration-150 ease-linear pointer-events-none"
@@ -543,7 +470,7 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                                 display: 'flex', alignItems: 'center', justifyContent: 'center'
                             }}
                         >
-                            <div className="bg-yellow-400 text-black p-1 rounded shadow-lg scale-125 ring-2 ring-white">
+                            <div className="bg-yellow-400 text-black p-2 rounded-xl shadow-xl scale-125 ring-4 ring-white">
                                 <TrainFront size={CELL_SIZE * 0.6} fill="currentColor" />
                             </div>
                         </div>
@@ -551,12 +478,70 @@ const Board: React.FC<BoardProps> = ({ level, onLevelComplete, onCollision }) =>
                 </div>
             </div>
 
-            {/* Helper Text for Gestures */}
-            <div className="absolute bottom-4 left-0 right-0 pointer-events-none flex justify-center opacity-50">
-                <span className="text-[10px] bg-slate-900/10 text-slate-600 px-2 py-1 rounded-full backdrop-blur-sm">
-                    1 dedo: Dibujar • 2 dedos: Mover y Zoom
-                </span>
+            {/* Bottom Control Bar - Mobile Optimized "Thumb Zone" */}
+            <div className="bg-white border-t border-slate-200 pb-safe pt-2 px-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 shrink-0 flex flex-col gap-3">
+                
+                {/* Row 1: Colors (Horizontal Scroll) */}
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                    {TRACK_COLORS.map(c => (
+                        <button
+                            key={c.name}
+                            onClick={() => { setActiveColor(c.hex); setDrawMode('add'); }}
+                            className={`w-12 h-12 shrink-0 rounded-full flex items-center justify-center transition-transform ${
+                                activeColor === c.hex && drawMode === 'add' 
+                                ? 'ring-4 ring-slate-800 scale-110 shadow-lg' 
+                                : 'opacity-80 scale-95'
+                            }`}
+                            style={{ backgroundColor: c.hex }}
+                        >
+                            <span className="text-xs font-bold text-white shadow-sm">{c.name}</span>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Row 2: Main Actions */}
+                <div className="flex items-center justify-between gap-4 pb-4">
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => setDrawMode(drawMode === 'add' ? 'remove' : 'add')}
+                            className={`flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-all ${
+                                drawMode === 'remove' 
+                                ? 'bg-rose-100 text-rose-600 ring-2 ring-rose-500' 
+                                : 'bg-slate-100 text-slate-500'
+                            }`}
+                        >
+                            {drawMode === 'remove' ? <Eraser size={24} /> : <Pencil size={24} />}
+                            <span className="text-[10px] font-bold uppercase mt-1">
+                                {drawMode === 'remove' ? 'Borrar' : 'Dibujar'}
+                            </span>
+                        </button>
+                        
+                        <button 
+                            onClick={() => { setConnections(new Map()); setEdgeColors(new Map()); }}
+                            className="flex flex-col items-center justify-center w-16 h-14 rounded-2xl bg-slate-100 text-slate-500 active:bg-slate-200"
+                        >
+                            <RotateCcw size={22} />
+                            <span className="text-[10px] font-bold uppercase mt-1">Limpiar</span>
+                        </button>
+                    </div>
+
+                    <button 
+                        onClick={startSimulation}
+                        disabled={isSimulating}
+                        className={`flex-1 h-14 rounded-2xl font-bold text-lg tracking-wide shadow-lg flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
+                            isSimulating 
+                            ? 'bg-slate-100 text-slate-400' 
+                            : 'bg-indigo-600 text-white shadow-indigo-200'
+                        }`}
+                    >
+                        {isSimulating ? 'Viajando...' : 'ARRANCAR'}
+                        {!isSimulating && <Play size={24} fill="currentColor" />}
+                    </button>
+                </div>
             </div>
+            
+            {/* Safe Area Spacer for iOS Home Bar */}
+            <div className="h-safe-bottom bg-white"></div>
         </div>
     );
 };

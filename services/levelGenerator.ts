@@ -40,14 +40,17 @@ const CITY_DATA: Record<string, string[]> = {
 
 const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
+// Adjusted for smaller grid 15x15 (Indices 0-14)
+const MAX_GRID = 14; 
+
 export const generateLevel = async (city: string, difficulty: number): Promise<LevelConfig> => {
     // Instant loading
     await new Promise(resolve => setTimeout(resolve, 50));
 
     const allStations = CITY_DATA[city] || CITY_DATA["Buenos Aires"];
-    // Shuffle and pick 20 (or less if city has fewer)
+    // Shuffle and pick 10 stations maximum for mobile readability
     const available = [...allStations];
-    const count = Math.min(20, available.length);
+    const count = Math.min(10, available.length);
     const shuffledNames = available.sort(() => 0.5 - Math.random()).slice(0, count);
 
     const usedCoords = new Set<string>();
@@ -57,9 +60,9 @@ export const generateLevel = async (city: string, difficulty: number): Promise<L
     const stations: Station[] = shuffledNames.map((name, index) => {
         let x, y, key;
         do {
-            // Keep some padding from edges
-            x = getRandomInt(1, 18);
-            y = getRandomInt(1, 18);
+            // Keep some padding from edges (1 to MAX-1)
+            x = getRandomInt(1, MAX_GRID - 1);
+            y = getRandomInt(1, MAX_GRID - 1);
             key = getKey(x, y);
         } while (usedCoords.has(key));
         usedCoords.add(key);
@@ -74,15 +77,15 @@ export const generateLevel = async (city: string, difficulty: number): Promise<L
 
     // 2. Place Obstacles
     const obstacles: Obstacle[] = [];
-    const obstacleCount = 10 + difficulty * 2; // Increase obstacles with difficulty
+    const obstacleCount = 6 + difficulty; // Reduced obstacle count for smaller grid
     const obstacleTypes = [CellType.OBSTACLE_WATER, CellType.OBSTACLE_FOSSIL, CellType.OBSTACLE_TUNNEL];
 
     for (let i = 0; i < obstacleCount; i++) {
         let x, y, key;
         let attempts = 0;
         do {
-            x = getRandomInt(0, 19);
-            y = getRandomInt(0, 19);
+            x = getRandomInt(0, MAX_GRID);
+            y = getRandomInt(0, MAX_GRID);
             key = getKey(x, y);
             attempts++;
         } while (usedCoords.has(key) && attempts < 50);
@@ -98,7 +101,7 @@ export const generateLevel = async (city: string, difficulty: number): Promise<L
     }
 
     // 3. Generate Route Request based on Difficulty
-    const routeLength = Math.min(difficulty + 1, stations.length);
+    const routeLength = Math.min(difficulty + 2, stations.length);
     const routeIndices: number[] = [];
     
     // Pick random start
@@ -126,9 +129,9 @@ export const generateLevel = async (city: string, difficulty: number): Promise<L
     
     let description = "";
     if (difficulty === 1) {
-        description = `El pasajero quiere ir directo de ${startName} a ${endName}. ¡Hacé el camino más corto, che!`;
+        description = `Llevame de ${startName} a ${endName}. ¡Cortito y al pie!`;
     } else if (difficulty < 4) {
-        description = `Hay que llevar gente desde ${startName} hasta ${endName}, pero parando en las intermedias.`;
+        description = `Tengo que ir de ${startName} a ${endName}, pero pasá por las estaciones que te marqué.`;
     } else {
         description = `¡Qué lío! Quieren ir de ${startName} a ${endName} dando toda una vuelta. Ojo con los túneles viejos.`;
     }
